@@ -1,0 +1,20 @@
+services:
+  cli-proxy-api:
+    image: ${CLI_PROXY_IMAGE:?Run bash ./deploy/cpa.sh deploy first}
+    pull_policy: never
+    container_name: ${CPA_CONTAINER_NAME:-cli-proxy-api}
+    environment:
+      DEPLOY: ${DEPLOY:-}
+    ports:
+      - "${CPA_BIND_ADDRESS:-127.0.0.1}:${CPA_API_PORT:-8317}:8317"
+      - "${CPA_OAUTH_BIND_ADDRESS:-127.0.0.1}:${CPA_CODEX_OAUTH_PORT:-1455}:1455"
+      - "${CPA_OAUTH_BIND_ADDRESS:-127.0.0.1}:${CPA_CLAUDE_OAUTH_PORT:-54545}:54545"
+      - "${CPA_OAUTH_BIND_ADDRESS:-127.0.0.1}:${CPA_ANTIGRAVITY_OAUTH_PORT:-51121}:51121"
+    volumes:
+      - "${CPA_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml"
+      - "${CPA_AUTH_PATH:-./auths}:/root/.cli-proxy-api"
+      - "${CPA_LOG_PATH:-./logs}:/CLIProxyAPI/logs"
+      - "${CPA_PLUGIN_PATH:-./plugins}:/CLIProxyAPI/plugins"
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
