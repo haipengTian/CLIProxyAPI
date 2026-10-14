@@ -139,7 +139,10 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 		return nil, fmt.Errorf("auth %s changed registration during persistence", auth.ID)
 	}
 	authClone := auth.Clone()
-	authClone.structuralUpdatedAt = time.Now()
+	if m.authStructuralUpdatedAt == nil {
+		m.authStructuralUpdatedAt = make(map[string]time.Time)
+	}
+	m.authStructuralUpdatedAt[auth.ID] = time.Now()
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -216,7 +219,7 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		m.mu.Unlock()
 		return nil, nil
 	}
-	if mode == updateModeObserved && auth.Generation == 0 && !auth.UpdatedAt.IsZero() && auth.UpdatedAt.Before(existing.structuralUpdatedAt) {
+	if mode == updateModeObserved && auth.Generation == 0 && !auth.UpdatedAt.IsZero() && auth.UpdatedAt.Before(m.authStructuralUpdatedAt[auth.ID]) {
 		current := existing.Clone()
 		m.mu.Unlock()
 		return current, nil
@@ -350,13 +353,17 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		auth.Generation = existing.Generation + 1
 	}
 	authClone := auth.Clone()
-	authClone.structuralUpdatedAt = time.Now()
+	if m.authStructuralUpdatedAt == nil {
+		m.authStructuralUpdatedAt = make(map[string]time.Time)
+	}
+	structuralUpdatedAt := time.Now()
 	if mode == updateModeObserved {
-		authClone.structuralUpdatedAt = existing.structuralUpdatedAt
-		if observedAt.After(authClone.structuralUpdatedAt) {
-			authClone.structuralUpdatedAt = observedAt
+		structuralUpdatedAt = m.authStructuralUpdatedAt[auth.ID]
+		if observedAt.After(structuralUpdatedAt) {
+			structuralUpdatedAt = observedAt
 		}
 	}
+	m.authStructuralUpdatedAt[auth.ID] = structuralUpdatedAt
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -403,6 +410,7 @@ func (m *Manager) Remove(ctx context.Context, id string) {
 	}
 	provider := strings.TrimSpace(existing.Provider)
 	delete(m.auths, id)
+	delete(m.authStructuralUpdatedAt, id)
 	m.notifyAuthChangeLocked(id)
 	if m.modelPoolOffsets != nil {
 		delete(m.modelPoolOffsets, id)
@@ -484,6 +492,7 @@ func (m *Manager) Load(ctx context.Context) error {
 	m.mu.Lock()
 	previousAuths := m.auths
 	m.auths = make(map[string]*Auth, len(items))
+	m.authStructuralUpdatedAt = make(map[string]time.Time, len(items))
 	if m.authEpochs == nil {
 		m.authEpochs = make(map[string]uint64, len(items))
 	}
@@ -508,9 +517,8 @@ func (m *Manager) Load(ctx context.Context) error {
 		if auth.CredentialVersion == 0 {
 			auth.CredentialVersion = 1
 		}
-		loadedAuth := auth.Clone()
-		loadedAuth.structuralUpdatedAt = time.Now()
-		m.auths[auth.ID] = loadedAuth
+		m.authStructuralUpdatedAt[auth.ID] = time.Now()
+		m.auths[auth.ID] = auth.Clone()
 	}
 
 	type removalTombstone struct {

@@ -113,8 +113,6 @@ type Auth struct {
 
 	recentRequests recentRequestRing `json:"-"`
 	indexAssigned  bool              `json:"-"`
-	// structuralUpdatedAt excludes request accounting changes when fencing file observations.
-	structuralUpdatedAt time.Time
 }
 
 const (
