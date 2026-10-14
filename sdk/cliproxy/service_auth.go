@@ -382,7 +382,14 @@ func (s *Service) prepareCoreAuthForModelRegistration(ctx context.Context, auth 
 			}
 		}
 		op = "update"
-		_, err = s.coreManager.Update(ctx, auth)
+		var updated *coreauth.Auth
+		updated, err = s.coreManager.UpdateObservedAuth(ctx, auth)
+		if err == nil {
+			if updated == nil {
+				return nil
+			}
+			auth = updated
+		}
 	} else {
 		_, err = s.coreManager.Register(ctx, auth)
 	}

@@ -139,6 +139,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 		return nil, fmt.Errorf("auth %s changed registration during persistence", auth.ID)
 	}
 	authClone := auth.Clone()
+	authClone.structuralUpdatedAt = time.Now()
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -169,6 +170,7 @@ const (
 	updateModeReplace updateAuthMode = iota
 	updateModeRefresh
 	updateModePrepare
+	updateModeObserved
 )
 
 // UpdatePreparedAuth atomically merges request preparation results into the latest runtime auth
@@ -188,10 +190,17 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	return m.updateInternal(ctx, nil, auth, updateModeReplace)
 }
 
+// UpdateObservedAuth applies a watcher snapshot without replacing a structural
+// change published after the file was observed. Request accounting is excluded.
+func (m *Manager) UpdateObservedAuth(ctx context.Context, auth *Auth) (*Auth, error) {
+	return m.updateInternal(ctx, nil, auth, updateModeObserved)
+}
+
 func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode) (*Auth, error) {
 	if auth == nil || auth.ID == "" {
 		return nil, nil
 	}
+	observedAt := auth.UpdatedAt
 	NormalizeCredentialMetadata(auth.Metadata)
 	if errWeight := ValidateAuthWeight(auth); errWeight != nil {
 		return nil, fmt.Errorf("update auth: %w", errWeight)
@@ -206,6 +215,11 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 	if !ok || existing == nil {
 		m.mu.Unlock()
 		return nil, nil
+	}
+	if mode == updateModeObserved && auth.Generation == 0 && !auth.UpdatedAt.IsZero() && auth.UpdatedAt.Before(existing.structuralUpdatedAt) {
+		current := existing.Clone()
+		m.mu.Unlock()
+		return current, nil
 	}
 	if m.authEpochs == nil {
 		m.authEpochs = make(map[string]uint64)
@@ -336,6 +350,13 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		auth.Generation = existing.Generation + 1
 	}
 	authClone := auth.Clone()
+	authClone.structuralUpdatedAt = time.Now()
+	if mode == updateModeObserved {
+		authClone.structuralUpdatedAt = existing.structuralUpdatedAt
+		if observedAt.After(authClone.structuralUpdatedAt) {
+			authClone.structuralUpdatedAt = observedAt
+		}
+	}
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -487,7 +508,9 @@ func (m *Manager) Load(ctx context.Context) error {
 		if auth.CredentialVersion == 0 {
 			auth.CredentialVersion = 1
 		}
-		m.auths[auth.ID] = auth.Clone()
+		loadedAuth := auth.Clone()
+		loadedAuth.structuralUpdatedAt = time.Now()
+		m.auths[auth.ID] = loadedAuth
 	}
 
 	type removalTombstone struct {

@@ -10,11 +10,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
 	internalregistry "github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/watcher"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
@@ -87,13 +89,22 @@ func TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559(t *testing.T) {
 		t.Fatalf("watcherFactory failed: %v", errWatcher)
 	}
 	service.watcher = watcherWrapper
-	service.ensureAuthUpdateQueue(ctx)
+	queueCtx, stopQueue := context.WithCancel(ctx)
+	service.authUpdates = make(chan watcher.AuthUpdate, 256)
+	service.authQueueStop = stopQueue
+	queueDone := make(chan struct{})
+	go func() {
+		defer close(queueDone)
+		service.consumeAuthUpdates(queueCtx)
+	}()
 	watcherWrapper.SetAuthUpdateQueue(service.authUpdates)
 	watcherWrapper.SetConfig(service.cfg)
 	t.Cleanup(func() {
-		if service.authQueueStop != nil {
-			service.authQueueStop()
+		if errStop := watcherWrapper.Stop(); errStop != nil {
+			t.Errorf("stop watcher: %v", errStop)
 		}
+		stopQueue()
+		<-queueDone
 		for _, a := range service.coreManager.List() {
 			if a != nil {
 				reg.UnregisterClient(a.ID)
@@ -101,7 +112,16 @@ func TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559(t *testing.T) {
 		}
 	})
 
-	server := api.NewServer(service.cfg, service.coreManager, service.accessManager, service.configPath, service.serverOptions...)
+	finalReloadDone := make(chan struct{})
+	var finalReloadOnce sync.Once
+	options := append([]api.ServerOption(nil), service.serverOptions...)
+	options = append(options, api.WithConfigReloadHook(func(_ context.Context, snapshot *config.Config) {
+		service.reloadConfigFromWatcher()
+		if len(snapshot.OpenAICompatibility) == 1 && snapshot.OpenAICompatibility[0].Name == "compat-9" {
+			finalReloadOnce.Do(func() { close(finalReloadDone) })
+		}
+	}))
+	server := api.NewServer(service.cfg, service.coreManager, service.accessManager, service.configPath, options...)
 	if server == nil {
 		t.Fatal("NewServer() returned nil")
 	}
@@ -171,6 +191,12 @@ func TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559(t *testing.T) {
 
 	close(start)
 	wg.Wait()
+	// A successful management response precedes its asynchronous config reload.
+	select {
+	case <-finalReloadDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("final management config reload did not complete")
+	}
 
 	// Ensure the final persisted configuration is reloaded through the watcher pipeline
 	// and verify both the patched auth prefix and final openai-compatibility model are registered.
@@ -178,20 +204,27 @@ func TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559(t *testing.T) {
 	service.registerConfigAPIKeyAuths(ctx, service.currentConfig())
 
 	finalPrefixModel := fmt.Sprintf("pfx-%d/gpt-6-astra", iterations-1)
-	if !reg.ClientSupportsModel(authID, finalPrefixModel) {
-		t.Fatalf("expected auth %s to support final prefixed model %q", authID, finalPrefixModel)
-	}
-
 	finalCompatAlias := fmt.Sprintf("alias-%d", iterations-1)
-	foundCompatModel := false
-	for _, a := range service.coreManager.List() {
-		if a != nil && reg.ClientSupportsModel(a.ID, finalCompatAlias) {
-			foundCompatModel = true
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		foundCompatModel := false
+		for _, a := range service.coreManager.List() {
+			if a != nil && reg.ClientSupportsModel(a.ID, finalCompatAlias) {
+				foundCompatModel = true
+				break
+			}
+		}
+		if foundCompatModel && reg.ClientSupportsModel(authID, finalPrefixModel) {
 			break
 		}
-	}
-	if !foundCompatModel {
-		t.Fatalf("expected registered openai-compatibility auth to support final model %q", finalCompatAlias)
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			t.Fatalf("final registrations did not converge: prefix=%q alias=%q found=%t", finalPrefixModel, finalCompatAlias, foundCompatModel)
+		}
 	}
 }
 
