@@ -1,0 +1,2 @@
+deploy/custom/** text eol=lf
+.github/workflows/custom-deployment.yml text eol=lf
