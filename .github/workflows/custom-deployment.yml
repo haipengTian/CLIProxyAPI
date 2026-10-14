@@ -1,7 +1,7 @@
 name: Personal bundled deployment
 on:
   pull_request:
-    paths: ['deploy/custom/**', '.github/workflows/custom-deployment.yml', '.dockerignore', '.github/workflows/docker-image.yml', '.github/workflows/release.yaml']
+    paths: ['deploy/custom/**', '.github/workflows/**', '.dockerignore']
   push:
     branches: [main, 'codex/cliproxyapi-deployment']
     tags: ['v*-custom.*']
