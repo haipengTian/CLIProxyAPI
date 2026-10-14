@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/wsrelay"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -40,6 +41,13 @@ func TestAIStudioTranslateRequestPreservesSummaryFromOriginalRequest(t *testing.
 }
 
 func TestAIStudioTranslateRequestNormalizesThinkingLevel(t *testing.T) {
+	// Keep level normalization independent of the evolving static model catalog.
+	modelRegistry := registry.GetGlobalRegistry()
+	clientID := "aistudio-thinking-level-test"
+	modelRegistry.RegisterClient(clientID, "aistudio", []*registry.ModelInfo{{
+		ID: "gemini-3.7-flash", Thinking: &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}},
+	}})
+	t.Cleanup(func() { modelRegistry.UnregisterClient(clientID) })
 	executor := NewAIStudioExecutor(&config.Config{}, "aistudio", nil)
 	req := cliproxyexecutor.Request{
 		Model: "gemini-3.7-flash",
