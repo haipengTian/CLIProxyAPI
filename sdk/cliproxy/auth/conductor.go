@@ -175,9 +175,11 @@ type Manager struct {
 	structuralEpoch           atomic.Uint64
 	syncedVersion             atomic.Uint64
 	auths                     map[string]*Auth
-	authEpochs                map[string]uint64
-	authChangeWatchers        map[string]map[chan struct{}]struct{}
-	scheduler                 *authScheduler
+	// authStructuralUpdatedAt fences file observations without changing persisted Auth values.
+	authStructuralUpdatedAt map[string]time.Time
+	authEpochs              map[string]uint64
+	authChangeWatchers      map[string]map[chan struct{}]struct{}
+	scheduler               *authScheduler
 	// pluginScheduler runs outside m.mu before falling back to native selection.
 	pluginScheduler PluginScheduler
 	// homeRuntimeAuths retains legacy session auth lookups for non-execution callers.

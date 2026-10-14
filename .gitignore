@@ -67,3 +67,7 @@ docker-compose.override.yml
 
 # Local LLM Wiki vault
 .llm-wiki
+
+# Personal deployment build artifacts
+.custom-build/
+__pycache__/

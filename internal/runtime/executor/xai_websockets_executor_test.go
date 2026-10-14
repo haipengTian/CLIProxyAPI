@@ -2256,10 +2256,15 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			return nil
 		})
 
+		payloadReceived := make(chan struct{}, 1)
 		go func() {
 			for {
 				if _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
 					return
+				}
+				select {
+				case payloadReceived <- struct{}{}:
+				default:
 				}
 			}
 		}()
@@ -2284,12 +2289,20 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			return
 		}
 
+		// Do not close the fixture before the upload held by the hook arrives.
+		select {
+		case <-payloadReceived:
+		case <-time.After(2 * time.Second):
+			t.Error("client payload was not received after pong delivery")
+			return
+		}
 		respPayload := []byte(`{"type":"response.done","response":{"id":"resp-1","status":"completed","output":[]}}`)
 		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
 	}))
 	defer server.Close()
 
 	exec := NewXAIWebsocketsExecutor(&config.Config{})
+	defer exec.CloseExecutionSession("xai-session-ping-test")
 	auth := &cliproxyauth.Auth{
 		ID:       "auth-xai-session-ping",
 		Provider: "xai",
@@ -2352,10 +2365,15 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return nil
 		})
 
+		payloadReceived := make(chan struct{}, 1)
 		go func() {
 			for {
 				if _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
 					return
+				}
+				select {
+				case payloadReceived <- struct{}{}:
+				default:
 				}
 			}
 		}()
@@ -2380,6 +2398,13 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return
 		}
 
+		// Do not close the fixture before the upload held by the hook arrives.
+		select {
+		case <-payloadReceived:
+		case <-time.After(2 * time.Second):
+			t.Error("client payload was not received after pong delivery")
+			return
+		}
 		respPayload := []byte(`{"type":"response.done","response":{"id":"resp-1","status":"completed","output":[]}}`)
 		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
 	}))

@@ -139,6 +139,10 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 		return nil, fmt.Errorf("auth %s changed registration during persistence", auth.ID)
 	}
 	authClone := auth.Clone()
+	if m.authStructuralUpdatedAt == nil {
+		m.authStructuralUpdatedAt = make(map[string]time.Time)
+	}
+	m.authStructuralUpdatedAt[auth.ID] = time.Now()
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -169,6 +173,7 @@ const (
 	updateModeReplace updateAuthMode = iota
 	updateModeRefresh
 	updateModePrepare
+	updateModeObserved
 )
 
 // UpdatePreparedAuth atomically merges request preparation results into the latest runtime auth
@@ -188,10 +193,17 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	return m.updateInternal(ctx, nil, auth, updateModeReplace)
 }
 
+// UpdateObservedAuth applies a watcher snapshot without replacing a structural
+// change published after the file was observed. Request accounting is excluded.
+func (m *Manager) UpdateObservedAuth(ctx context.Context, auth *Auth) (*Auth, error) {
+	return m.updateInternal(ctx, nil, auth, updateModeObserved)
+}
+
 func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode) (*Auth, error) {
 	if auth == nil || auth.ID == "" {
 		return nil, nil
 	}
+	observedAt := auth.UpdatedAt
 	NormalizeCredentialMetadata(auth.Metadata)
 	if errWeight := ValidateAuthWeight(auth); errWeight != nil {
 		return nil, fmt.Errorf("update auth: %w", errWeight)
@@ -206,6 +218,11 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 	if !ok || existing == nil {
 		m.mu.Unlock()
 		return nil, nil
+	}
+	if mode == updateModeObserved && auth.Generation == 0 && !auth.UpdatedAt.IsZero() && auth.UpdatedAt.Before(m.authStructuralUpdatedAt[auth.ID]) {
+		current := existing.Clone()
+		m.mu.Unlock()
+		return current, nil
 	}
 	if m.authEpochs == nil {
 		m.authEpochs = make(map[string]uint64)
@@ -336,6 +353,17 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		auth.Generation = existing.Generation + 1
 	}
 	authClone := auth.Clone()
+	if m.authStructuralUpdatedAt == nil {
+		m.authStructuralUpdatedAt = make(map[string]time.Time)
+	}
+	structuralUpdatedAt := time.Now()
+	if mode == updateModeObserved {
+		structuralUpdatedAt = m.authStructuralUpdatedAt[auth.ID]
+		if observedAt.After(structuralUpdatedAt) {
+			structuralUpdatedAt = observedAt
+		}
+	}
+	m.authStructuralUpdatedAt[auth.ID] = structuralUpdatedAt
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -382,6 +410,7 @@ func (m *Manager) Remove(ctx context.Context, id string) {
 	}
 	provider := strings.TrimSpace(existing.Provider)
 	delete(m.auths, id)
+	delete(m.authStructuralUpdatedAt, id)
 	m.notifyAuthChangeLocked(id)
 	if m.modelPoolOffsets != nil {
 		delete(m.modelPoolOffsets, id)
@@ -463,6 +492,7 @@ func (m *Manager) Load(ctx context.Context) error {
 	m.mu.Lock()
 	previousAuths := m.auths
 	m.auths = make(map[string]*Auth, len(items))
+	m.authStructuralUpdatedAt = make(map[string]time.Time, len(items))
 	if m.authEpochs == nil {
 		m.authEpochs = make(map[string]uint64, len(items))
 	}
@@ -487,6 +517,7 @@ func (m *Manager) Load(ctx context.Context) error {
 		if auth.CredentialVersion == 0 {
 			auth.CredentialVersion = 1
 		}
+		m.authStructuralUpdatedAt[auth.ID] = time.Now()
 		m.auths[auth.ID] = auth.Clone()
 	}
 

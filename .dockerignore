@@ -39,3 +39,8 @@ bin
 .bmad
 _bmad
 _bmad-output
+
+# Personal build inputs are supplied through a separate named context.
+.custom-build
+_frontend
+!LICENSE
