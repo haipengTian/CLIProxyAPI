@@ -28,7 +28,7 @@ config = {
  'config-version': 8,
  'server': {'host':'0.0.0.0','port':8317},
  'management': {'allow-remote':True,'secret-key':'a'*64,'disable-control-panel':False,'disable-auto-update-panel':True},
- 'access': {'api-keys':['b'*64]},
+ 'access': {'api-keys':['legacy-client-key','b'*64]},
  'oauth': {'auth-dir':'/CLIProxyAPI/auths'},
  'observability': {'logs': {'logging-to-file': True, 'logs-max-total-size-mb':10}},
  'plugins': {'enabled':False,'dir':'/CLIProxyAPI/plugins'}
@@ -64,7 +64,7 @@ import json, time, urllib.request, urllib.error
 from pathlib import Path
 request=urllib.request.Request('http://127.0.0.1:8317/v1/chat/completions',
  data=json.dumps({'model':'deployment-smoke-missing-model','messages':[{'role':'user','content':'test'}]}).encode(),
- headers={'Authorization':'Bearer '+'b'*64,'Content-Type':'application/json'})
+ headers={'Authorization':'Bearer legacy-client-key','Content-Type':'application/json'})
 try:
  urllib.request.urlopen(request,timeout=10).close()
  raise AssertionError('missing model should fail')

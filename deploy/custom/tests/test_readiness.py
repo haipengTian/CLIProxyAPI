@@ -49,8 +49,24 @@ class ReadinessTests(unittest.TestCase):
     def test_accepts_strong_credentials(self):
         self.assertEqual(self.validate(), ["b" * 64])
 
-    def test_rejects_template_or_empty_api_keys(self):
-        for keys in ([], ["your-api-key-1"], ["short"], ["b" * 64, ""], ["b" * 64 + "\n"], ["b" * 64 + "中文"]):
+    def test_existing_short_client_keys_remain_usable(self):
+        self.config["access"]["api-keys"] = ["legacy-key"]
+        self.assertEqual(self.validate(), ["legacy-key"])
+
+    def test_existing_custom_client_keys_are_not_reinterpreted_as_templates(self):
+        self.config["access"]["api-keys"] = ["your-api-key-custom"]
+        self.assertEqual(self.validate(), ["your-api-key-custom"])
+
+    def test_client_keys_follow_backend_whitespace_normalization(self):
+        self.config["access"]["api-keys"] = ["", "  legacy-key  ", "  "]
+        self.assertEqual(self.validate(), ["legacy-key"])
+
+    def test_client_keys_preserve_supported_internal_spaces(self):
+        self.config["access"]["api-keys"] = ["legacy client key"]
+        self.assertEqual(self.validate(), ["legacy client key"])
+
+    def test_rejects_empty_or_unusable_api_keys(self):
+        for keys in ([], [""], ["  "], [123], ["b" * 64 + "\nunsafe"], ["b" * 64 + "中文"]):
             with self.subTest(keys=keys):
                 self.config["access"]["api-keys"] = keys
                 with self.assertRaises(ValueError):
