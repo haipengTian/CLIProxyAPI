@@ -1,4 +1,4 @@
-ARG BUN_IMAGE=oven/bun:1.3.14
+ARG BUN_IMAGE=oven/bun:1.4.3
 ARG NODE_IMAGE=node:24-bookworm-slim
 FROM ${BUN_IMAGE} AS bun
 FROM ${NODE_IMAGE} AS build

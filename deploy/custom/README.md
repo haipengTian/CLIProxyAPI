@@ -6,7 +6,7 @@ The runtime uses Debian, UID/GID 10001, four writable data directories and file 
 
 ## Verification
 
-Use Go 1.26.4, Python 3 with PyYAML, Node 24 and Bun 1.3.14. The paired frontend must pass `bun run verify`; the backend must pass `go test ./...` and build. Deployment unit tests run with:
+Use Go 1.26.10, Python 3 with PyYAML, Node 24 and Bun 1.4.3. The paired frontend must pass `bun run verify`; the backend must pass `go test ./...` and build. Deployment unit tests run with:
 
 ```bash
 python3 -m unittest discover -s deploy/custom/tests -v
@@ -30,4 +30,4 @@ Docker health probes only `/healthz`. The one-shot readiness gate validates conf
 
 Before releasing, push the frontend pinned commit so CI can retrieve it, review/merge the backend and server-ops changes, confirm all checks succeeded, then create the personal release tag. The workflow uses `GITHUB_TOKEN` with packages permission. The paired release records source commits, UI checksum, image digest and tested amd64 architecture. Confirm package visibility and anonymous pull before server installation. Server scripts bind only localhost and pin the release digest.
 
-Current local verification and test portability fixes are documented in the paired server-ops `cliproxyapi/verification.md`. There is no published custom image yet.
+Release and server verification are documented in the paired server-ops `cliproxyapi/verification.md`.
