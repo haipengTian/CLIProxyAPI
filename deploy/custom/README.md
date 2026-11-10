@@ -24,6 +24,8 @@ The smoke uses the real image CMD with network disabled and synthetic keys. It v
 
 Docker health probes only `/healthz`. The one-shot readiness gate validates configuration, bundle integrity and client API authentication. It deliberately does not issue anonymous management requests: the backend counts failed management authentication and bans an IP after repeated attempts. Redirects are refused to prevent forwarding credentials, and error output never includes keys or response bodies.
 
+Readiness preserves existing client keys, including short keys accepted by the backend. It trims surrounding whitespace and ignores blank entries as the backend does, then verifies real authenticated API access. New installations continue generating random keys; readiness does not rotate deployed credentials or impose a new minimum length during upgrades.
+
 ## Release
 
 `custom-deployment.yml` verifies code and the offline image before publishing. It uploads the exact tested Docker image, then loads/tags/pushes those same bytes to GHCR; the publish job does not rebuild. Only `vX.Y.Z-custom.N` tags reachable from remote main publish. Inherited official publishing jobs are restricted to the official repository.

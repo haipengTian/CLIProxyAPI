@@ -16,6 +16,7 @@ class HTTPReadinessTests(unittest.TestCase):
         self.panel = b"<html>pinned panel</html>"
         self.calls = []
         self.mode = "normal"
+        self.client_key = "b" * 64
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -26,7 +27,9 @@ class HTTPReadinessTests(unittest.TestCase):
                     self.send_header("Location", "/leaked")
                     self.end_headers()
                     return
-                code = 401 if self.path == "/v1/models" and not self.headers.get("Authorization") else 200
+                code = 200
+                if self.path == "/v1/models" and self.headers.get("Authorization") != "Bearer " + owner.client_key:
+                    code = 401
                 self.send_response(code)
                 self.end_headers()
                 if self.path == "/management.html":
@@ -57,6 +60,18 @@ class HTTPReadinessTests(unittest.TestCase):
         self.panel = b"<html>wrong panel</html>"
         with self.assertRaises(ValueError):
             readiness.verify_http(self.base, ["b" * 64], digest)
+
+    def test_existing_short_key_is_authenticated(self):
+        self.client_key = "legacy-key"
+        readiness.verify_http(self.base, [self.client_key], hashlib.sha256(self.panel).hexdigest())
+
+    def test_client_key_with_internal_spaces_is_authenticated(self):
+        self.client_key = "legacy client key"
+        readiness.verify_http(self.base, [self.client_key], hashlib.sha256(self.panel).hexdigest())
+
+    def test_incorrect_client_key_still_fails_readiness(self):
+        with self.assertRaises(ValueError):
+            readiness.verify_http(self.base, ["incorrect-key"], hashlib.sha256(self.panel).hexdigest())
 
     def test_redirects_are_rejected_without_forwarding_credentials(self):
         self.mode = "redirect"

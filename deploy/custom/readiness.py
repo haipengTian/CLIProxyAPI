@@ -46,12 +46,23 @@ def validate_config(path):
     keys = access.get("api-keys")
     if not isinstance(keys, list) or not keys:
         raise ValueError("at least one client API key is required")
+    normalized_keys = []
     for key in keys:
-        if not isinstance(key, str) or not re.fullmatch(r"[!-~]{24,}", key) or key.startswith("your-api-key"):
-            raise ValueError("client keys must be strong and cannot use template values")
+        if not isinstance(key, str):
+            raise ValueError("client API keys must be strings")
+        # Match the backend's normalization without imposing a new key policy
+        # on existing clients. Authentication is verified against the live API.
+        key = key.strip()
+        if not key:
+            continue
+        if not re.fullmatch(r"[ -~]+", key):
+            raise ValueError("client keys must be usable in Authorization headers")
         if key == secret:
             raise ValueError("management and client API keys must be different")
-    return keys
+        normalized_keys.append(key)
+    if not normalized_keys:
+        raise ValueError("at least one client API key is required")
+    return normalized_keys
 
 
 def validate_static(directory):
